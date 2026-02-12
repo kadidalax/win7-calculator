@@ -21,7 +21,8 @@ jobs:
       shell: cmd
       run: |
         call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
-        cl.exe /O2 /MT /DUNICODE /D_UNICODE /Fe:Calculator_Win7.exe calc_win7.cpp user32.lib gdi32.lib comctl32.lib dwmapi.lib shell32.lib comdlg32.lib Msimg32.lib /link /SUBSYSTEM:WINDOWS /ENTRY:wWinMainCRTStartup
+        rc.exe /nologo resource.rc
+        cl.exe /O2 /MT /DUNICODE /D_UNICODE /Fe:Calculator_Win7.exe calc_win7.cpp resource.res user32.lib gdi32.lib comctl32.lib dwmapi.lib shell32.lib comdlg32.lib Msimg32.lib /link /SUBSYSTEM:WINDOWS /ENTRY:wWinMainCRTStartup
         
     - name: Check file size
       shell: pwsh
