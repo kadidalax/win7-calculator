@@ -2,8 +2,12 @@
 // Minimal size, no dependencies, single EXE
 // Compile with: cl.exe /O2 /MT /Fe:Calculator_Win7.exe calc_win7.cpp user32.lib gdi32.lib comctl32.lib dwmapi.lib shell32.lib comdlg32.lib
 
+#ifndef UNICODE
 #define UNICODE
+#endif
+#ifndef _UNICODE
 #define _UNICODE
+#endif
 #define WIN32_LEAN_AND_MEAN
 #define _CRT_SECURE_NO_WARNINGS
 
@@ -37,6 +41,10 @@ processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 #define BUTTON_HEIGHT   40
 #define DISPLAY_HEIGHT  60
 
+// Colors
+#define CLR_TEXT_NORMAL RGB(0, 0, 0)
+#define CLR_TEXT_OP     RGB(0, 0, 150)
+
 // Tab IDs
 #define TAB_CALC        0
 #define TAB_CALENDAR    1
@@ -68,6 +76,17 @@ enum ButtonID {
     BTN_TODAY
 };
 
+// Forward declarations
+void InitFonts();
+
+// Globals - Moved up for visibility
+static HWND hTab = NULL;
+static HWND hDisplay = NULL;
+static HWND hMemoryIndicator = NULL;
+static HFONT hFontDisplay = NULL;
+static HFONT hFontButton = NULL;
+static HFONT hFontNormal = NULL;
+
 // Calendar state
 struct CalendarState {
     SYSTEMTIME selectedDate;
@@ -78,18 +97,6 @@ struct CalendarState {
     bool initialized;
     CalendarState() : initialized(false) {}
 };
-
-void InitFonts() {
-    hFontDisplay = CreateFontW(28, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-        
-    hFontButton = CreateFontW(14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-        
-    hFontNormal = hFontButton; // Reuse button font for generic UI
-}
 
 // Date calc state
 struct DateCalcState {
@@ -115,18 +122,22 @@ struct CalcState {
     }
 };
 
-// Globals
 static CalcState g_state;
 static CalendarState g_calState;
 static DateCalcState g_dateState;
 static int g_curTab = TAB_CALC;
 
-static HWND hTab = NULL;
-static HWND hDisplay = NULL;
-static HWND hMemoryIndicator = NULL;
-static HFONT hFontDisplay = NULL;
-static HFONT hFontButton = NULL;
-static HFONT hFontNormal = NULL;
+void InitFonts() {
+    hFontDisplay = CreateFontW(28, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+        
+    hFontButton = CreateFontW(14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+        
+    hFontNormal = hFontButton; // Reuse button font for generic UI
+}
 
 // Calculator controls (for show/hide)
 static HWND hCalcControls[50];
