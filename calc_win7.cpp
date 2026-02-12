@@ -1,6 +1,6 @@
 // Windows 7 Style Calculator - Native Win32 C++ with Calendar & Date Calc
 // Minimal size, no dependencies, single EXE
-// Compile with: cl.exe /O2 /MT /Fe:Calculator_Win7.exe calc_win7.cpp user32.lib gdi32.lib comctl32.lib dwmapi.lib shell32.lib comdlg32.lib
+// Compile with: cl.exe /O2 /MT /Fe:Calculator_Win7.exe calc_win7.cpp user32.lib gdi32.lib comctl32.lib dwmapi.lib shell32.lib comdlg32.lib Msimg32.lib
 
 #ifndef UNICODE
 #define UNICODE
@@ -27,6 +27,7 @@
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "comdlg32.lib")
+#pragma comment(lib, "Msimg32.lib")
 
 // Enable visual styles
 #pragma comment(linker,"\"/manifestdependency:type='win32' \
