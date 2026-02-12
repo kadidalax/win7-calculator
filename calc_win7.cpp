@@ -897,6 +897,10 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
         return 0;
     }
     
+    // Calculate required window size based on client area
+    RECT rc = {0, 0, WINDOW_WIDTH, WINDOW_HEIGHT};
+    AdjustWindowRectEx(&rc, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, FALSE, WS_EX_CLIENTEDGE | WS_EX_COMPOSITED);
+
     // Create window
     HWND hwnd = CreateWindowExW(
         WS_EX_CLIENTEDGE | WS_EX_COMPOSITED,
@@ -904,7 +908,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
         L"Calculator",
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
         CW_USEDEFAULT, CW_USEDEFAULT,
-        WINDOW_WIDTH, WINDOW_HEIGHT,
+        rc.right - rc.left, rc.bottom - rc.top,
         NULL, NULL, hInstance, NULL
     );
     
