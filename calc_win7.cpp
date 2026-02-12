@@ -1,6 +1,8 @@
 // Windows 7 Style Calculator - Native Win32 C++ with Calendar & Date Calc
 // Minimal size, no dependencies, single EXE
-// Compile with: cl.exe /O2 /MT /Fe:Calculator_Win7.exe calc_win7.cpp user32.lib gdi32.lib comctl32.lib dwmapi.lib shell32.lib comdlg32.lib Msimg32.lib
+// Compile with: 
+// rc.exe resource.rc
+// cl.exe /O2 /MT /Fe:Calculator_Win7.exe calc_win7.cpp resource.res user32.lib gdi32.lib comctl32.lib dwmapi.lib shell32.lib comdlg32.lib Msimg32.lib
 
 #ifndef UNICODE
 #define UNICODE
@@ -35,8 +37,10 @@ name='Microsoft.Windows.Common-Controls' version='6.0.0.0' \
 processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
 // Constants
-#define WINDOW_WIDTH    420
+#define IDI_ICON        101
+#define WINDOW_WIDTH    700  // Increased for history sidebar
 #define WINDOW_HEIGHT   520
+#define HISTORY_WIDTH   260
 #define CALC_WIDTH      360
 #define BUTTON_WIDTH    52
 #define BUTTON_HEIGHT   40
@@ -64,6 +68,7 @@ processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 #define IDC_BTN_CALCADD 26
 #define IDC_RESULT      27
 #define IDC_DTP_BASE    28
+#define IDC_LIST_HISTORY 30
 
 // Button IDs
 enum ButtonID {
@@ -84,6 +89,7 @@ void InitFonts();
 static HWND hTab = NULL;
 static HWND hDisplay = NULL;
 static HWND hMemoryIndicator = NULL;
+static HWND hHistoryList = NULL;
 static HFONT hFontDisplay = NULL;
 static HFONT hFontButton = NULL;
 static HFONT hFontNormal = NULL;
@@ -263,12 +269,25 @@ LRESULT CALLBACK ButtonProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
 
 // Create button helper
 HWND CreateCalcButton(HWND parent, int id, const WCHAR* text, int x, int y, int w, int h) {
+    DWORD style = WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON;
+
+    // 保留系统按压反馈前提下做视觉分层
+    if (id == BTN_EQUAL) style |= BS_DEFPUSHBUTTON;                  // 主操作
+    else if (id >= BTN_ADD && id <= BTN_DIV) style |= BS_FLAT;       // 运算符区分
+
+    // Remove WS_TABSTOP to keep focus on main window for keyboard input
+    style &= ~WS_TABSTOP;
+
     HWND btn = CreateWindowW(L"BUTTON", text,
-        WS_VISIBLE | WS_CHILD | BS_OWNERDRAW | BS_PUSHBUTTON,
+        style,
         x, y, w, h, parent, (HMENU)(UINT_PTR)id,
         GetModuleHandle(NULL), NULL);
+
+    SendMessage(btn, WM_SETFONT, (WPARAM)hFontButton, TRUE);
     
-    SetWindowSubclass(btn, ButtonProc, 0, (DWORD_PTR)id);
+    // Enable custom drawing
+    SetWindowSubclass(btn, ButtonProc, id, (DWORD_PTR)id);
+    
     if (hCalcCount < 50) hCalcControls[hCalcCount++] = btn;
     return btn;
 }
@@ -276,34 +295,43 @@ HWND CreateCalcButton(HWND parent, int id, const WCHAR* text, int x, int y, int 
 // Create calculator UI
 void CreateCalculatorUI(HWND hwnd) {
     // Create display
+    // Width limited to allow space for history sidebar
     hDisplay = CreateWindowW(L"STATIC", L"0",
-        WS_VISIBLE | WS_CHILD | SS_RIGHT | SS_NOTIFY | WS_BORDER,
-        12, 45, WINDOW_WIDTH - 24, DISPLAY_HEIGHT,
+        WS_VISIBLE | WS_CHILD | SS_RIGHT | SS_NOTIFY | WS_BORDER | SS_SUNKEN,
+        12, 45, 370, DISPLAY_HEIGHT, 
         hwnd, NULL, GetModuleHandle(NULL), NULL);
     if (hCalcCount < 50) hCalcControls[hCalcCount++] = hDisplay;
-    
+
     // Set display font
     SendMessage(hDisplay, WM_SETFONT, (WPARAM)hFontDisplay, TRUE);
-    
+
     // Memory indicator
     hMemoryIndicator = CreateWindowW(L"STATIC", L"",
         WS_VISIBLE | WS_CHILD | SS_LEFT,
-        12, 110, 50, 20, hwnd, NULL, GetModuleHandle(NULL), NULL);
+        12, 110, 300, 20, hwnd, NULL, GetModuleHandle(NULL), NULL);
+    SendMessage(hMemoryIndicator, WM_SETFONT, (WPARAM)hFontNormal, TRUE);
     if (hCalcCount < 50) hCalcControls[hCalcCount++] = hMemoryIndicator;
-    
-    // Fonts created in InitFonts()
-    
+
+    // History ListBox (Sidebar)
+    // Positioned at X=390 (original width - padding), Y=45
+    hHistoryList = CreateWindowW(L"LISTBOX", NULL,
+        WS_VISIBLE | WS_CHILD | WS_BORDER | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
+        390, 45, HISTORY_WIDTH, 435, 
+        hwnd, (HMENU)IDC_LIST_HISTORY, GetModuleHandle(NULL), NULL);
+    SendMessage(hHistoryList, WM_SETFONT, (WPARAM)hFontNormal, TRUE);
+    if (hCalcCount < 50) hCalcControls[hCalcCount++] = hHistoryList;
+
     int startX = 12;
     int startY = 140;
     int gap = 6;
-    
+
     // Row 1: Backspace, CE, C, +/-, sqrt
     CreateCalcButton(hwnd, BTN_BACK, L"\u2190", startX, startY, BUTTON_WIDTH, 32);
     CreateCalcButton(hwnd, BTN_CE, L"CE", startX + (BUTTON_WIDTH+gap), startY, BUTTON_WIDTH, 32);
     CreateCalcButton(hwnd, BTN_C, L"C", startX + 2*(BUTTON_WIDTH+gap), startY, BUTTON_WIDTH, 32);
     CreateCalcButton(hwnd, BTN_NEG, L"\u00b1", startX + 3*(BUTTON_WIDTH+gap), startY, BUTTON_WIDTH, 32);
     CreateCalcButton(hwnd, BTN_SQRT, L"\u221a", startX + 4*(BUTTON_WIDTH+gap), startY, BUTTON_WIDTH, 32);
-    
+
     // Memory row
     int memY = startY + 38;
     CreateCalcButton(hwnd, BTN_MC, L"MC", startX, memY, BUTTON_WIDTH, 32);
@@ -311,12 +339,12 @@ void CreateCalculatorUI(HWND hwnd) {
     CreateCalcButton(hwnd, BTN_MS, L"MS", startX + 2*(BUTTON_WIDTH+gap), memY, BUTTON_WIDTH, 32);
     CreateCalcButton(hwnd, BTN_MPLUS, L"M+", startX + 3*(BUTTON_WIDTH+gap), memY, BUTTON_WIDTH, 32);
     CreateCalcButton(hwnd, BTN_MMINUS, L"M-", startX + 4*(BUTTON_WIDTH+gap), memY, BUTTON_WIDTH, 32);
-    
+
     // Number pad
     int numStartY = memY + 40;
     const WCHAR* nums[] = {L"7", L"8", L"9", L"4", L"5", L"6", L"1", L"2", L"3", L"0"};
     int numIds[] = {BTN_7, BTN_8, BTN_9, BTN_4, BTN_5, BTN_6, BTN_1, BTN_2, BTN_3, BTN_0};
-    
+
     for (int row = 0; row < 3; row++) {
         for (int col = 0; col < 3; col++) {
             int idx = row * 3 + col;
@@ -325,13 +353,13 @@ void CreateCalculatorUI(HWND hwnd) {
             CreateCalcButton(hwnd, numIds[idx], nums[idx], x, y, BUTTON_WIDTH, BUTTON_HEIGHT);
         }
     }
-    
+
     // Zero button (double width)
     CreateCalcButton(hwnd, BTN_0, L"0", startX, numStartY + 3*(BUTTON_HEIGHT+gap), BUTTON_WIDTH*2+gap, BUTTON_HEIGHT);
-    
+
     // Decimal
     CreateCalcButton(hwnd, BTN_DOT, L".", startX + 2*(BUTTON_WIDTH+gap), numStartY + 3*(BUTTON_HEIGHT+gap), BUTTON_WIDTH, BUTTON_HEIGHT);
-    
+
     // Operators
     const WCHAR* ops[] = {L"/", L"*", L"-", L"+"};
     int opIds[] = {BTN_DIV, BTN_MUL, BTN_SUB, BTN_ADD};
@@ -339,39 +367,133 @@ void CreateCalculatorUI(HWND hwnd) {
         CreateCalcButton(hwnd, opIds[i], ops[i], startX + 3*(BUTTON_WIDTH+gap),
             numStartY + i*(BUTTON_HEIGHT+gap), BUTTON_WIDTH, BUTTON_HEIGHT);
     }
-    
+
     // Special functions
     CreateCalcButton(hwnd, BTN_PERCENT, L"%", startX + 4*(BUTTON_WIDTH+gap), numStartY, BUTTON_WIDTH, BUTTON_HEIGHT);
     CreateCalcButton(hwnd, BTN_RECIP, L"1/x", startX + 4*(BUTTON_WIDTH+gap), numStartY + (BUTTON_HEIGHT+gap), BUTTON_WIDTH, BUTTON_HEIGHT);
-    
+
     // Equal button
     CreateCalcButton(hwnd, BTN_EQUAL, L"=", startX + 4*(BUTTON_WIDTH+gap),
         numStartY + 2*(BUTTON_HEIGHT+gap), BUTTON_WIDTH, BUTTON_HEIGHT*2+gap);
 }
 
+static bool IsErrorDisplay() {
+    return strcmp(g_state.displayText, "Error") == 0;
+}
+
+static double GetDisplayNumber() {
+    return atof(g_state.displayText);
+}
+
+static void SetDisplayNumber(double value) {
+    if (value == floor(value)) sprintf(g_state.displayText, "%.0f", value);
+    else sprintf(g_state.displayText, "%.12g", value);
+}
+
+static char g_lastHistory[160] = "";
+
+static void PushHistory(const char* expr) {
+    if (!expr) return;
+    strncpy(g_lastHistory, expr, sizeof(g_lastHistory) - 1);
+    g_lastHistory[sizeof(g_lastHistory) - 1] = '\0';
+
+    if (hHistoryList) {
+        WCHAR wExpr[256];
+        MultiByteToWideChar(CP_ACP, 0, expr, -1, wExpr, 256);
+        int idx = SendMessage(hHistoryList, LB_ADDSTRING, 0, (LPARAM)wExpr);
+        SendMessage(hHistoryList, LB_SETCURSEL, idx, 0); // Auto scroll to bottom
+    }
+}
+
+static bool CopyTextToClipboard(HWND hwnd, const char* textA) {
+    if (!textA) return false;
+
+    WCHAR wbuf[256];
+    MultiByteToWideChar(CP_ACP, 0, textA, -1, wbuf, 256);
+    SIZE_T bytes = (wcslen(wbuf) + 1) * sizeof(WCHAR);
+
+    if (!OpenClipboard(hwnd)) return false;
+    EmptyClipboard();
+    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, bytes);
+    if (!hMem) { CloseClipboard(); return false; }
+
+    void* p = GlobalLock(hMem);
+    memcpy(p, wbuf, bytes);
+    GlobalUnlock(hMem);
+
+    SetClipboardData(CF_UNICODETEXT, hMem);
+    CloseClipboard();
+    return true;
+}
+
+static bool PasteTextFromClipboard(HWND hwnd, char* outA, int outSize) {
+    if (!outA || outSize <= 1) return false;
+    outA[0] = '\0';
+
+    if (!OpenClipboard(hwnd)) return false;
+    HANDLE hData = GetClipboardData(CF_UNICODETEXT);
+    if (!hData) { CloseClipboard(); return false; }
+
+    WCHAR* wtext = (WCHAR*)GlobalLock(hData);
+    if (!wtext) { CloseClipboard(); return false; }
+
+    char buf[256] = {0};
+    WideCharToMultiByte(CP_ACP, 0, wtext, -1, buf, sizeof(buf), NULL, NULL);
+    GlobalUnlock(hData);
+    CloseClipboard();
+
+    // 简单数值合法性过滤
+    int j = 0;
+    for (int i = 0; buf[i] != '\0' && j < outSize - 1; ++i) {
+        char c = buf[i];
+        if ((c >= '0' && c <= '9') || c == '.' || c == '-' || c == '+'
+            || c == 'e' || c == 'E') {
+            outA[j++] = c;
+        }
+    }
+    outA[j] = '\0';
+
+    if (j == 0) return false;
+    return true;
+}
+
 // Update display
 void UpdateDisplay() {
     WCHAR wtext[256];
-    MultiByteToWideChar(CP_UTF8, 0, g_state.displayText, -1, wtext, 256);
+    MultiByteToWideChar(CP_ACP, 0, g_state.displayText, -1, wtext, 256);
     SetWindowTextW(hDisplay, wtext);
-    
-    // Update memory indicator
-    SetWindowTextW(hMemoryIndicator, g_state.hasMemory ? L"M" : L"");
+
+    // Update memory indicator + latest history
+    WCHAR wh[256];
+    if (g_lastHistory[0] != '\0') {
+        WCHAR whis[180];
+        MultiByteToWideChar(CP_ACP, 0, g_lastHistory, -1, whis, 180);
+        StringCchPrintfW(wh, 256, L"%s%s%s",
+            g_state.hasMemory ? L"M  |  " : L"",
+            whis,
+            L"");
+        SetWindowTextW(hMemoryIndicator, wh);
+    } else {
+        SetWindowTextW(hMemoryIndicator, g_state.hasMemory ? L"M" : L"");
+    }
 }
 
 // Handle digit input
 void InputDigit(int digit) {
-    if (g_state.waitingForOperand) {
+    if (digit < 0 || digit > 9) return;
+
+    if (g_state.waitingForOperand || IsErrorDisplay()) {
         g_state.displayText[0] = '0' + digit;
         g_state.displayText[1] = '\0';
         g_state.waitingForOperand = false;
     } else {
         int len = (int)strlen(g_state.displayText);
-        if (g_state.displayText[0] == '0' && len == 1) {
+        if (strcmp(g_state.displayText, "0") == 0) {
             g_state.displayText[0] = '0' + digit;
-        } else if (len < 15) {
+            g_state.displayText[1] = '\0';
+        } else if (len < 30) {
             g_state.displayText[len] = '0' + digit;
-            g_state.displayText[len+1] = '\0';
+            g_state.displayText[len + 1] = '\0';
         }
     }
     UpdateDisplay();
@@ -379,32 +501,36 @@ void InputDigit(int digit) {
 
 // Calculate result
 void Calculate() {
-    double current = atof(g_state.displayText);
-    double result = 0;
-    
+    if (g_state.currentOp == 0) return;
+
+    double left = g_state.previousValue;
+    double right = GetDisplayNumber();
+    double result = 0.0;
+
     switch (g_state.currentOp) {
-        case '+': result = g_state.previousValue + current; break;
-        case '-': result = g_state.previousValue - current; break;
-        case '*': result = g_state.previousValue * current; break;
-        case '/': 
-            if (current != 0) result = g_state.previousValue / current;
-            else {
+        case '+': result = left + right; break;
+        case '-': result = left - right; break;
+        case '*': result = left * right; break;
+        case '/':
+            if (right == 0.0) {
                 strcpy(g_state.displayText, "Error");
+                PushHistory("Divide by zero");
+                g_state.waitingForOperand = true;
                 UpdateDisplay();
                 return;
             }
+            result = left / right;
             break;
         default: return;
     }
-    
-    // Format result
-    if (result == floor(result)) {
-        sprintf(g_state.displayText, "%.0f", result);
-    } else {
-        sprintf(g_state.displayText, "%.10g", result);
-    }
-    
+
     g_state.previousValue = result;
+    SetDisplayNumber(result);
+
+    char expr[160];
+    snprintf(expr, sizeof(expr), "%.12g %c %.12g = %s", left, g_state.currentOp, right, g_state.displayText);
+    PushHistory(expr);
+
     g_state.waitingForOperand = true;
     UpdateDisplay();
 }
@@ -415,10 +541,17 @@ void HandleButton(int id) {
         InputDigit(id - BTN_0);
     }
     else if (id >= BTN_ADD && id <= BTN_DIV) {
-        g_state.previousValue = atof(g_state.displayText);
-        g_state.currentOp = (id == BTN_ADD) ? '+' : 
-                           (id == BTN_SUB) ? '-' :
-                           (id == BTN_MUL) ? '*' : '/';
+        if (IsErrorDisplay()) strcpy(g_state.displayText, "0");
+
+        if (g_state.currentOp != 0 && !g_state.waitingForOperand) {
+            Calculate(); // 连续运算
+        } else {
+            g_state.previousValue = GetDisplayNumber();
+        }
+
+        g_state.currentOp = (id == BTN_ADD) ? '+' :
+                            (id == BTN_SUB) ? '-' :
+                            (id == BTN_MUL) ? '*' : '/';
         g_state.waitingForOperand = true;
     }
     else if (id == BTN_EQUAL) {
@@ -427,41 +560,47 @@ void HandleButton(int id) {
     }
     else if (id == BTN_C) {
         g_state = CalcState();
+        g_lastHistory[0] = '\0';
         UpdateDisplay();
     }
     else if (id == BTN_CE) {
-        g_state.displayText[0] = '0';
-        g_state.displayText[1] = '\0';
+        strcpy(g_state.displayText, "0");
+        g_state.waitingForOperand = false;
         UpdateDisplay();
     }
     else if (id == BTN_BACK) {
-        int len = (int)strlen(g_state.displayText);
-        if (len > 1) {
-            g_state.displayText[len-1] = '\0';
+        if (g_state.waitingForOperand || IsErrorDisplay()) {
+            strcpy(g_state.displayText, "0");
         } else {
-            g_state.displayText[0] = '0';
-            g_state.displayText[1] = '\0';
+            int len = (int)strlen(g_state.displayText);
+            if (len > 1) g_state.displayText[len - 1] = '\0';
+            else strcpy(g_state.displayText, "0");
         }
         UpdateDisplay();
     }
     else if (id == BTN_DOT) {
-        if (strchr(g_state.displayText, '.') == NULL) {
+        if (g_state.waitingForOperand || IsErrorDisplay()) {
+            strcpy(g_state.displayText, "0.");
+            g_state.waitingForOperand = false;
+        } else if (strchr(g_state.displayText, '.') == NULL) {
             int len = (int)strlen(g_state.displayText);
-            if (len < 15) {
+            if (len < 30) {
                 g_state.displayText[len] = '.';
-                g_state.displayText[len+1] = '\0';
+                g_state.displayText[len + 1] = '\0';
             }
         }
         UpdateDisplay();
     }
     else if (id == BTN_NEG) {
-        if (g_state.displayText[0] == '-') {
-            memmove(g_state.displayText, g_state.displayText+1, strlen(g_state.displayText));
-        } else if (g_state.displayText[0] != '0' || strlen(g_state.displayText) > 1) {
-            memmove(g_state.displayText+1, g_state.displayText, strlen(g_state.displayText)+1);
-            g_state.displayText[0] = '-';
+        if (!IsErrorDisplay()) {
+            if (g_state.displayText[0] == '-') {
+                memmove(g_state.displayText, g_state.displayText + 1, strlen(g_state.displayText));
+            } else if (strcmp(g_state.displayText, "0") != 0) {
+                memmove(g_state.displayText + 1, g_state.displayText, strlen(g_state.displayText) + 1);
+                g_state.displayText[0] = '-';
+            }
+            UpdateDisplay();
         }
-        UpdateDisplay();
     }
     else if (id == BTN_MC) {
         g_state.memoryValue = 0;
@@ -469,50 +608,61 @@ void HandleButton(int id) {
         UpdateDisplay();
     }
     else if (id == BTN_MR) {
-        sprintf(g_state.displayText, "%.10g", g_state.memoryValue);
+        SetDisplayNumber(g_state.memoryValue);
         g_state.waitingForOperand = true;
         UpdateDisplay();
     }
     else if (id == BTN_MS) {
-        g_state.memoryValue = atof(g_state.displayText);
+        g_state.memoryValue = GetDisplayNumber();
         g_state.hasMemory = (g_state.memoryValue != 0);
         g_state.waitingForOperand = true;
         UpdateDisplay();
     }
     else if (id == BTN_MPLUS) {
-        g_state.memoryValue += atof(g_state.displayText);
+        g_state.memoryValue += GetDisplayNumber();
         g_state.hasMemory = (g_state.memoryValue != 0);
         g_state.waitingForOperand = true;
         UpdateDisplay();
     }
     else if (id == BTN_MMINUS) {
-        g_state.memoryValue -= atof(g_state.displayText);
+        g_state.memoryValue -= GetDisplayNumber();
         g_state.hasMemory = (g_state.memoryValue != 0);
         g_state.waitingForOperand = true;
         UpdateDisplay();
     }
     else if (id == BTN_SQRT) {
-        double val = atof(g_state.displayText);
+        double val = GetDisplayNumber();
         if (val >= 0) {
-            sprintf(g_state.displayText, "%.10g", sqrt(val));
+            SetDisplayNumber(sqrt(val));
+            char expr[160];
+            snprintf(expr, sizeof(expr), "sqrt(%.12g) = %s", val, g_state.displayText);
+            PushHistory(expr);
         } else {
             strcpy(g_state.displayText, "Error");
+            PushHistory("sqrt of negative");
         }
         g_state.waitingForOperand = true;
         UpdateDisplay();
     }
     else if (id == BTN_PERCENT) {
-        double val = atof(g_state.displayText);
-        sprintf(g_state.displayText, "%.10g", val / 100.0);
+        double val = GetDisplayNumber();
+        SetDisplayNumber(val / 100.0);
+        char expr[160];
+        snprintf(expr, sizeof(expr), "%.12g%% = %s", val, g_state.displayText);
+        PushHistory(expr);
         g_state.waitingForOperand = true;
         UpdateDisplay();
     }
     else if (id == BTN_RECIP) {
-        double val = atof(g_state.displayText);
+        double val = GetDisplayNumber();
         if (val != 0) {
-            sprintf(g_state.displayText, "%.10g", 1.0 / val);
+            SetDisplayNumber(1.0 / val);
+            char expr[160];
+            snprintf(expr, sizeof(expr), "1/(%.12g) = %s", val, g_state.displayText);
+            PushHistory(expr);
         } else {
             strcpy(g_state.displayText, "Error");
+            PushHistory("1/0");
         }
         g_state.waitingForOperand = true;
         UpdateDisplay();
@@ -556,44 +706,44 @@ void CreateTabControl(HWND hwnd) {
     icex.dwICC = ICC_TAB_CLASSES | ICC_DATE_CLASSES;
     InitCommonControlsEx(&icex);
 
-    hTab = CreateWindowW(WC_TABCONTROL, L"", 
-        WS_CHILD | WS_CLIPSIBLINGS | WS_VISIBLE, 
-        0, 0, WINDOW_WIDTH, 26, hwnd, (HMENU)IDC_TAB, GetModuleHandle(NULL), NULL);
+    hTab = CreateWindowW(WC_TABCONTROL, L"",
+        WS_CHILD | WS_CLIPSIBLINGS | WS_VISIBLE,
+        0, 0, WINDOW_WIDTH, 28, hwnd, (HMENU)IDC_TAB, GetModuleHandle(NULL), NULL);
 
     SendMessage(hTab, WM_SETFONT, (WPARAM)hFontNormal, 0);
 
     TCITEMW tie;
     tie.mask = TCIF_TEXT;
-    
-    tie.pszText = (LPWSTR)L"Calculator";
+
+    tie.pszText = (LPWSTR)L"标准";
     TabCtrl_InsertItem(hTab, TAB_CALC, &tie);
-    
-    tie.pszText = (LPWSTR)L"Calendar";
+
+    tie.pszText = (LPWSTR)L"日历";
     TabCtrl_InsertItem(hTab, TAB_CALENDAR, &tie);
-    
-    tie.pszText = (LPWSTR)L"Date Calc";
+
+    tie.pszText = (LPWSTR)L"日期计算";
     TabCtrl_InsertItem(hTab, TAB_DATECALC, &tie);
 }
 
 // --- Calendar UI ---
 void CreateCalendarUI(HWND hwnd) {
     // Month Calendar
-    g_calState.hMonthCal = CreateWindowW(MONTHCAL_CLASS, L"", 
-        WS_CHILD | WS_BORDER | MCS_DAYSTATE,
-        10, 40, WINDOW_WIDTH - 35, 300, 
+    g_calState.hMonthCal = CreateWindowW(MONTHCAL_CLASS, L"",
+        WS_CHILD | WS_BORDER | MCS_DAYSTATE | MCS_WEEKNUMBERS,
+        10, 40, 385, 300,
         hwnd, (HMENU)IDC_MONTHCAL, GetModuleHandle(NULL), NULL);
 
     // Info Label
-    g_calState.hInfoLabel = CreateWindowW(L"STATIC", L"Select a date...",
+    g_calState.hInfoLabel = CreateWindowW(L"STATIC", L"选择一个日期...",
         WS_CHILD | SS_LEFT,
-        15, 360, WINDOW_WIDTH - 40, 100,
+        15, 360, 380, 100,
         hwnd, (HMENU)IDC_DATEINFO, GetModuleHandle(NULL), NULL);
-    SendMessage(g_calState.hInfoLabel, WM_SETFONT, (WPARAM)hFontDisplay, 0); // Reuse large font
+    SendMessage(g_calState.hInfoLabel, WM_SETFONT, (WPARAM)hFontNormal, 0);
 
     // Today Button
-    g_calState.hBtnToday = CreateWindowW(L"BUTTON", L"Go to Today",
+    g_calState.hBtnToday = CreateWindowW(L"BUTTON", L"今天",
         WS_CHILD | BS_PUSHBUTTON,
-        WINDOW_WIDTH - 120, 450, 100, 30,
+        300, 450, 100, 30,
         hwnd, (HMENU)BTN_TODAY, GetModuleHandle(NULL), NULL);
     SendMessage(g_calState.hBtnToday, WM_SETFONT, (WPARAM)hFontNormal, 0);
 
@@ -626,8 +776,8 @@ void AddDateCtrl(HWND h) { if(hDateCount < 30) hDateCtrls[hDateCount++] = h; }
 
 void CreateDateCalcUI(HWND hwnd) {
     // 1. Date Difference
-    AddDateCtrl(CreateWindowW(L"BUTTON", L"Calculate Difference", WS_CHILD|BS_GROUPBOX, 10, 40, WINDOW_WIDTH-35, 200, hwnd, NULL, GetModuleHandle(NULL), NULL));
-    
+    AddDateCtrl(CreateWindowW(L"BUTTON", L"Calculate Difference", WS_CHILD|BS_GROUPBOX, 10, 40, 385, 200, hwnd, NULL, GetModuleHandle(NULL), NULL));
+
     AddDateCtrl(CreateWindowW(L"STATIC", L"From:", WS_CHILD|SS_CENTERIMAGE, 20, 70, 40, 25, hwnd, NULL, NULL, NULL));
     hDtpStart = CreateWindowW(DATETIMEPICK_CLASS, L"", WS_CHILD|WS_BORDER|DTS_SHORTDATEFORMAT, 70, 70, 120, 25, hwnd, (HMENU)IDC_DTP_START, NULL, NULL);
     AddDateCtrl(hDtpStart);
@@ -638,11 +788,11 @@ void CreateDateCalcUI(HWND hwnd) {
 
     AddDateCtrl(CreateWindowW(L"BUTTON", L"Calculate Interval", WS_CHILD|BS_PUSHBUTTON, 130, 110, 140, 30, hwnd, (HMENU)IDC_BTN_CALCDIFF, NULL, NULL));
 
-    hResDiff = CreateWindowW(L"STATIC", L"", WS_CHILD|SS_CENTER, 20, 150, WINDOW_WIDTH-55, 80, hwnd, NULL, NULL, NULL);
+    hResDiff = CreateWindowW(L"STATIC", L"", WS_CHILD|SS_CENTER, 20, 150, 365, 80, hwnd, NULL, NULL, NULL);
     AddDateCtrl(hResDiff);
 
     // 2. Date Add/Sub
-    AddDateCtrl(CreateWindowW(L"BUTTON", L"Add/Subtract Date", WS_CHILD|BS_GROUPBOX, 10, 260, WINDOW_WIDTH-35, 200, hwnd, NULL, GetModuleHandle(NULL), NULL));
+    AddDateCtrl(CreateWindowW(L"BUTTON", L"Add/Subtract Date", WS_CHILD|BS_GROUPBOX, 10, 260, 385, 200, hwnd, NULL, GetModuleHandle(NULL), NULL));
 
     hDtpBase = CreateWindowW(DATETIMEPICK_CLASS, L"", WS_CHILD|WS_BORDER|DTS_SHORTDATEFORMAT, 20, 290, 120, 25, hwnd, (HMENU)IDC_DTP_BASE, NULL, NULL);
     AddDateCtrl(hDtpBase);
@@ -666,7 +816,7 @@ void CreateDateCalcUI(HWND hwnd) {
 
     AddDateCtrl(CreateWindowW(L"BUTTON", L"Calculate Date", WS_CHILD|BS_PUSHBUTTON, 130, 330, 140, 30, hwnd, (HMENU)IDC_BTN_CALCADD, NULL, NULL));
 
-    hResAdd = CreateWindowW(L"STATIC", L"", WS_CHILD|SS_CENTER, 20, 370, WINDOW_WIDTH-55, 80, hwnd, NULL, NULL, NULL);
+    hResAdd = CreateWindowW(L"STATIC", L"", WS_CHILD|SS_CENTER, 20, 370, 365, 80, hwnd, NULL, NULL, NULL);
     AddDateCtrl(hResAdd);
 }
 
@@ -797,8 +947,14 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         
         case WM_CTLCOLORSTATIC: {
             HDC hdc = (HDC)wParam;
+            HWND hCtl = (HWND)lParam;
             SetBkMode(hdc, TRANSPARENT);
-            SetTextColor(hdc, RGB(50, 50, 50));
+
+            if (hCtl == hDisplay && IsErrorDisplay()) {
+                SetTextColor(hdc, RGB(200, 20, 20)); // Error 红色高亮
+            } else {
+                SetTextColor(hdc, RGB(50, 50, 50));
+            }
             return (LRESULT)GetStockObject(NULL_BRUSH);
         }
         
@@ -814,6 +970,26 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             
             if (g_curTab == TAB_CALC) {
                 if (code == BN_CLICKED) HandleButton(id);
+                else if (id == IDC_LIST_HISTORY && code == LBN_DBLCLK) {
+                    // Double click on history item to recall value
+                    int idx = SendMessage(hHistoryList, LB_GETCURSEL, 0, 0);
+                    if (idx != LB_ERR) {
+                        WCHAR wtext[256];
+                        SendMessage(hHistoryList, LB_GETTEXT, idx, (LPARAM)wtext);
+                        // Parse result (after last '=')
+                        WCHAR* res = wcsrchr(wtext, L'=');
+                        if (res) {
+                            res++; // Skip '='
+                            while (*res == L' ') res++; // Skip spaces
+                            char buf[256];
+                            WideCharToMultiByte(CP_ACP, 0, res, -1, buf, sizeof(buf), NULL, NULL);
+                            strncpy(g_state.displayText, buf, sizeof(g_state.displayText)-1);
+                            g_state.displayText[sizeof(g_state.displayText)-1] = '\0';
+                            g_state.waitingForOperand = false;
+                            UpdateDisplay();
+                        }
+                    }
+                }
             }
             else if (g_curTab == TAB_CALENDAR) {
                 if (id == BTN_TODAY && code == BN_CLICKED) {
@@ -859,15 +1035,49 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         
         case WM_KEYDOWN: {
             if (g_curTab == TAB_CALC) {
-                if (wParam >= '0' && wParam <= '9') InputDigit(wParam - '0');
+                // Ctrl+C / Ctrl+V
+                if (GetKeyState(VK_CONTROL) < 0) {
+                    if (wParam == 'C') {
+                        CopyTextToClipboard(hwnd, g_state.displayText);
+                        return 0;
+                    } else if (wParam == 'V') {
+                        char pasted[128];
+                        if (PasteTextFromClipboard(hwnd, pasted, sizeof(pasted))) {
+                            strncpy(g_state.displayText, pasted, sizeof(g_state.displayText) - 1);
+                            g_state.displayText[sizeof(g_state.displayText) - 1] = '\0';
+                            g_state.waitingForOperand = false;
+                            PushHistory("Paste value");
+                            UpdateDisplay();
+                        }
+                        return 0;
+                    }
+                }
+
+                // 运算（先处理 Shift+8 的 *，避免被当作数字 8）
+                if (wParam == VK_MULTIPLY || (wParam == '8' && GetKeyState(VK_SHIFT) < 0)) HandleButton(BTN_MUL);
                 else if (wParam == VK_ADD || wParam == VK_OEM_PLUS) HandleButton(BTN_ADD);
                 else if (wParam == VK_SUBTRACT || wParam == VK_OEM_MINUS) HandleButton(BTN_SUB);
-                else if (wParam == VK_MULTIPLY) HandleButton(BTN_MUL);
                 else if (wParam == VK_DIVIDE || wParam == VK_OEM_2) HandleButton(BTN_DIV);
+
+                // 顶排数字
+                else if (wParam >= '0' && wParam <= '9') InputDigit((int)(wParam - '0'));
+                // 小键盘数字
+                else if (wParam >= VK_NUMPAD0 && wParam <= VK_NUMPAD9) InputDigit((int)(wParam - VK_NUMPAD0));
+
+                // 结果与编辑
                 else if (wParam == VK_RETURN) HandleButton(BTN_EQUAL);
                 else if (wParam == VK_BACK) HandleButton(BTN_BACK);
+                else if (wParam == VK_DELETE) HandleButton(BTN_CE);
                 else if (wParam == VK_ESCAPE) HandleButton(BTN_C);
+
+                // 小数点
                 else if (wParam == VK_DECIMAL || wParam == VK_OEM_PERIOD) HandleButton(BTN_DOT);
+
+                // 快捷功能键
+                else if (wParam == 'C') HandleButton(BTN_C);
+                else if (wParam == 'N') HandleButton(BTN_NEG);
+                else if (wParam == 'R') HandleButton(BTN_SQRT);
+                else if (wParam == 'P' || (wParam == '5' && GetKeyState(VK_SHIFT) < 0)) HandleButton(BTN_PERCENT);
             }
             return 0;
         }
@@ -887,7 +1097,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
     wc.cbSize = sizeof(WNDCLASSEXW);
     wc.lpfnWndProc = WndProc;
     wc.hInstance = hInstance;
-    wc.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+    wc.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON));
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
     wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
     wc.lpszClassName = L"Win7CalcClass";
